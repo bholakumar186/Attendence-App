@@ -160,7 +160,7 @@ class SupabaseService {
       if (response.status == 200) {
         final data = response.data as Map<String, dynamic>;
         final match = data['match'] == true;
-        final confidence = (data['confidence'] ?? 0);
+        final confidence = (data['similarity'] ?? 0);
         debugPrint("Face match: $match, confidence: $confidence");
         return match && confidence > 50;
       } else {

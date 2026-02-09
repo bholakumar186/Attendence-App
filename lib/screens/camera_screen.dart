@@ -77,7 +77,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
       // Face verification (server-side ideally)
       bool isFaceMatched = await supa.verifyFaceMatch(
-        capturedSelfie.path,
+        capturedSelfie,
         user.id,
       );
       if (!isFaceMatched) {

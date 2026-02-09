@@ -67,7 +67,7 @@ class _SignupScreenState extends State<SignupScreen> {
         password: _passCtrl.text.trim(),
         fullName: _nameCtrl.text.trim(),
         employeeId: _empCtrl.text.trim(),
-        avatarPath: _selfie?.path,
+        avatarFile: _selfie,
       );
 
       if (user != null) {

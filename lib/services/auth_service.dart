@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'supabase_service.dart';
+import 'package:image_picker/image_picker.dart';
 
 class AuthService {
   final _client = Supabase.instance.client;
@@ -26,7 +27,7 @@ class AuthService {
     required String password,
     required String fullName,
     required String employeeId,
-    String? avatarPath,
+    XFile? avatarFile,
     int maxRetries = 3,
   }) async {
     try {
@@ -41,8 +42,8 @@ class AuthService {
       }
 
       String? avatarUrl;
-      if (avatarPath != null) {
-        avatarUrl = await SupabaseService().uploadAvatar(user.id, avatarPath);
+      if (avatarFile != null) {
+        avatarUrl = await SupabaseService().uploadAvatar(user.id, avatarFile);
       }
 
       // Insert profile row (create or update)
@@ -64,7 +65,6 @@ class AuthService {
     }
   }
 
-  /// Generic retry wrapper with exponential backoff + jitter.
   Future<T> _retryWithBackoff<T>(
     Future<T> Function() operation, {
     int maxRetries = 3,

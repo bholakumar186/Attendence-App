@@ -1,9 +1,9 @@
-import 'dart:io';
-import 'dart:convert';
+import 'dart:typed_data';
+import 'package:image_picker/image_picker.dart';
+import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart';
-
 
 class SupabaseService {
   final _client = Supabase.instance.client;
@@ -28,50 +28,49 @@ class SupabaseService {
     }
   }
 
-  /// Fetch the user's profile by combining `employees` (role, employee_id)
-  /// and `profiles` (full_name, avatar_url, etc.). This ensures role is
-  /// available for role-based UI (e.g., admin features).
-  /// Fetch user profile from `employees` table only
-Future<Map<String, dynamic>?> getProfile(String userId) async {
-  try {
-    final res = await _client
-        .from('employees')
-        .select()
-        .eq('user_id', userId)
-        .limit(1)
-        .maybeSingle();
-
-    if (res == null) return null;
-
-    return Map<String, dynamic>.from(res as Map);
-  } catch (e) {
-    return null;
-  }
-}
-
-  /// Upload avatar to the 'avatars' storage bucket and return public url
-  Future<String?> uploadAvatar(String userId, String filePath) async {
+  Future<Map<String, dynamic>?> getProfile(String userId) async {
     try {
-      final bucket = _client.storage.from('avatars');
-      final fileName = 'user_$userId.jpg';
-      final file = File(filePath);
-      await bucket.upload(
-        fileName,
-        file,
-        fileOptions: const FileOptions(upsert: true),
-      );
-      final url = bucket.getPublicUrl(fileName);
-      return url.toString();
+      final res = await _client
+          .from('employees')
+          .select()
+          .eq('user_id', userId)
+          .limit(1)
+          .maybeSingle();
+
+      if (res == null) return null;
+
+      return Map<String, dynamic>.from(res as Map);
     } catch (e) {
       return null;
     }
   }
 
-  /// Fetch recent attendance logs for an employee
+  Future<String?> uploadAvatar(String userId, XFile imageFile) async {
+    try {
+      final bucket = _client.storage.from('avatars');
+      final fileName = 'user_$userId.jpg';
+
+      // Read bytes (works on mobile + web)
+      final Uint8List bytes = await imageFile.readAsBytes();
+
+      await bucket.uploadBinary(
+        fileName,
+        bytes,
+        fileOptions: const FileOptions(upsert: true),
+      );
+
+      final url = bucket.getPublicUrl(fileName);
+      return url;
+    } catch (e) {
+      debugPrint('Upload avatar error: $e');
+      return null;
+    }
+  }
+
   Future<List<dynamic>> fetchAttendanceRecords(String employeeId) async {
     try {
       final res = await _client
-          .from('attendance_logs')
+          .from('attendance')
           .select()
           .eq('employee_id', employeeId)
           .order('created_at', ascending: false);
@@ -81,7 +80,6 @@ Future<Map<String, dynamic>?> getProfile(String userId) async {
     }
   }
 
-  /// Fetch today's attendance row from the canonical `attendance` table
   Future<Map<String, dynamic>?> fetchTodayAttendance(String employeeId) async {
     try {
       final res = await _client
@@ -97,7 +95,6 @@ Future<Map<String, dynamic>?> getProfile(String userId) async {
     }
   }
 
-  /// Count distinct days with an 'IN' status
   Future<int> getPresentDaysCount(String employeeId) async {
     try {
       final logs = await fetchAttendanceRecords(employeeId);
@@ -117,17 +114,66 @@ Future<Map<String, dynamic>?> getProfile(String userId) async {
     }
   }
 
-  /// Placeholder for face verification
-  /// In production call your backend or 3rd-party face-match API
-  Future<bool> verifyFaceMatch(String imagePath, String userId) async {
-    // TODO: Implement secure server-side face verification
-    // For now, we accept the selfie (you must replace this with proper verification)
-    await Future.delayed(const Duration(milliseconds: 800));
-    return true;
+  Future<bool> verifyFaceMatch(XFile imageFile, String userId) async {
+    final client = Supabase.instance.client;
+    try {
+      // Step 1: Read file bytes
+      Uint8List fileBytes = await imageFile.readAsBytes();
+
+      if (fileBytes.isEmpty) {
+        debugPrint("File is empty: ${imageFile.name}");
+        return false;
+      }
+
+      // Step 2: Generate file name
+      final fileName =
+          'verify/${userId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      debugPrint("Uploading file as $fileName");
+
+      // Step 3: Upload to Supabase storage
+      final uploadResponse = await client.storage
+          .from('avatars')
+          .uploadBinary(
+            fileName,
+            fileBytes,
+            fileOptions: const FileOptions(cacheControl: '3600', upsert: false),
+          );
+
+      debugPrint("Upload Response: $uploadResponse");
+
+      // Step 4: Call Supabase Edge Function for face verification
+      final session = client.auth.currentSession;
+      if (session == null) {
+        debugPrint('User not logged in');
+        return false;
+      }
+      final response = await client.functions.invoke(
+        'verify-face',
+        headers: {'Authorization': 'Bearer ${session!.accessToken}'},
+        body: {'userId': userId, 'verifyImagePath': fileName},
+      );
+
+      debugPrint("Edge function response status: ${response.status}");
+      debugPrint("Edge function response data: ${response.data}");
+
+      // Step 5: Check response
+      if (response.status == 200) {
+        final data = response.data as Map<String, dynamic>;
+        final match = data['match'] == true;
+        final confidence = (data['confidence'] ?? 0);
+        debugPrint("Face match: $match, confidence: $confidence");
+        return match && confidence > 50;
+      } else {
+        debugPrint("Face verification failed with status: ${response.status}");
+        return false;
+      }
+    } catch (e, st) {
+      debugPrint('Face Match Error: $e');
+      debugPrint('$st');
+      return false;
+    }
   }
 
-  /// Mark IN attendance using a secure RPC (server side function)
-  /// Updated Mark IN attendance
   Future<Map<String, dynamic>> markAttendanceIn({
     required String employeeId,
     required double lat,
@@ -154,7 +200,6 @@ Future<Map<String, dynamic>?> getProfile(String userId) async {
     }
   }
 
-  /// Updated Mark OUT attendance
   Future<Map<String, dynamic>> markAttendanceOut({
     required String employeeId,
     required double lat,
@@ -178,8 +223,6 @@ Future<Map<String, dynamic>?> getProfile(String userId) async {
     }
   }
 
-  /// Fetch monthly attendance summary via RPC
-  /// Fetch monthly attendance summary via RPC
   Future<Map<String, dynamic>> fetchMonthlySummary({
     required String employeeId,
     required int year,
@@ -200,8 +243,6 @@ Future<Map<String, dynamic>?> getProfile(String userId) async {
     }
   }
 
-  /// Admin-only: Request backend to create a new employee (server must use service role key)
-  /// This calls your external admin API (Node/Edge function). Provide ADMIN_API_URL in env
   Future<Map<String, dynamic>> createEmployeeViaAdmin({
     required String name,
     required String email,

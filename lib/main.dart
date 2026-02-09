@@ -17,6 +17,10 @@ Future<void> main() async {
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5bmJlYWVta3BpaXdxam9jcWNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwMTE5ODAsImV4cCI6MjA4NTU4Nzk4MH0.4c4BS7Ro7bw6yd71T1zq7_p25f5JGsFfrP2BVbOoVHM',
   );
 
+  final session = Supabase.instance.client.auth.currentSession;
+print('Restored session: $session');
+
+
   runApp(const AttendanceApp());
 }
 
@@ -50,13 +54,18 @@ class AuthGate extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Check if a user session already exists
-    final session = Supabase.instance.client.auth.currentSession;
+    return StreamBuilder<AuthState>(
+      stream: Supabase.instance.client.auth.onAuthStateChange,
+      builder: (context, snapshot) {
+        final session = snapshot.data?.session ?? Supabase.instance.client.auth.currentSession;
 
-    if (session == null) {
-      return const LoginScreen();
-    } else {
-      return const AttendanceDashboard();
-    }
+        if (session == null) {
+          return const LoginScreen();
+        } else {
+          return const AttendanceDashboard();
+        }
+      },
+    );
   }
 }
+

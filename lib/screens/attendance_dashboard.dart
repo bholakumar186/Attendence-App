@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:intl/intl.dart';
+import '../services/auth_service.dart';
 
 // Ensure these paths match your project structure exactly
 import 'camera_screen.dart';
-import 'admin/create_employee_screen.dart';
+// import 'admin/create_employee_screen.dart';
+// import 'admin/attendance_list_screen.dart';
 import '../services/supabase_service.dart';
 import 'auth/login_screen.dart';
 
@@ -18,6 +21,7 @@ class AttendanceDashboard extends StatefulWidget {
 class _AttendanceDashboardState extends State<AttendanceDashboard> {
   Map<String, dynamic>? _profile;
   int _presentDays = 0;
+  Map<String, dynamic>? _today;
   List<dynamic> _recentLogs = [];
   bool _loading = true;
 
@@ -26,10 +30,126 @@ class _AttendanceDashboardState extends State<AttendanceDashboard> {
   static const Color brandOrange = Color(0xFFF05A28);
   static const Color bgSurface = Color(0xFFF8FAFC);
 
+  Future<void> _showPasswordDialog() async {
+    final passwordController = TextEditingController();
+    final confirmController = TextEditingController(); // New Controller
+    final formKey = GlobalKey<FormState>(); // For validation
+
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white, // Ensures a clean background
+        title: Text(
+          'Update Password',
+          style: GoogleFonts.poppins(
+            color: brandDarkBlue,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // --- New Password Field ---
+              TextFormField(
+                controller: passwordController,
+                obscureText: true,
+                style: const TextStyle(
+                  color: brandDarkBlue,
+                ), // Explicit text color
+                decoration: const InputDecoration(
+                  labelText: "New Password",
+                  labelStyle: TextStyle(color: Colors.grey),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: brandOrange),
+                  ),
+                ),
+                validator: (val) => (val == null || val.length < 6)
+                    ? "Minimum 6 characters"
+                    : null,
+              ),
+              const SizedBox(height: 15),
+
+              // --- Confirm Password Field ---
+              TextFormField(
+                controller: confirmController,
+                obscureText: true,
+                style: const TextStyle(
+                  color: brandDarkBlue,
+                ), // Explicit text color
+                decoration: const InputDecoration(
+                  labelText: "Confirm Password",
+                  labelStyle: TextStyle(color: Colors.grey),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: brandOrange),
+                  ),
+                ),
+                validator: (val) {
+                  if (val != passwordController.text)
+                    return "Passwords do not match";
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('CANCEL', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: brandDarkBlue),
+            onPressed: () async {
+              // Validate both fields
+              if (formKey.currentState!.validate()) {
+                await _changePassword(passwordController.text);
+                if (mounted) Navigator.pop(context);
+              }
+            },
+            child: const Text('UPDATE', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _changePassword(String newPass) async {
+    try {
+      // Note: Ensure updatePassword exists in your AuthService first!
+      await AuthService().updatePassword(newPass);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Password updated successfully!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  String _formatDateTime(String? timeStr) {
+    if (timeStr == null || timeStr.isEmpty) return 'Time Unknown';
+    try {
+      // Converts the string to a local DateTime object
+      DateTime dateTime = DateTime.parse(timeStr).toLocal();
+
+      // Formats to: "Feb 10, 10:30 AM"
+      return DateFormat('MMM d, h:mm a').format(dateTime);
+    } catch (e) {
+      return timeStr;
+    }
   }
 
   Future<void> _loadData() async {
@@ -49,12 +169,14 @@ class _AttendanceDashboardState extends State<AttendanceDashboard> {
       final employeeId = profile?['employee_id'] ?? user.id;
       final presentCount = await supa.getPresentDaysCount(employeeId);
       final logs = await supa.fetchAttendanceRecords(employeeId);
+      final today = await supa.fetchTodayAttendance(employeeId);
 
       if (mounted) {
         setState(() {
           _profile = profile;
           _presentDays = presentCount;
           _recentLogs = logs;
+          _today = today;
           _loading = false;
         });
       }
@@ -80,26 +202,21 @@ class _AttendanceDashboardState extends State<AttendanceDashboard> {
           ),
         ),
         actions: [
-          if (_profile != null &&
-              (_profile!['role'] == 'admin' ||
-                  _profile!['role'] == 'superadmin'))
-            IconButton(
-              icon: const Icon(Icons.person_add_alt_1, color: Colors.white),
-              tooltip: 'Create Employee',
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const CreateEmployeeScreen(),
-                  ),
-                );
-              },
+          // --- ADD THIS PORTION ---
+          IconButton(
+            icon: const Icon(
+              Icons.vpn_key_rounded,
+              color: Colors.white70,
+              size: 18,
             ),
+            onPressed: _showPasswordDialog,
+            tooltip: 'Change Password',
+          ),
+          // ------------------------
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Colors.white),
             onPressed: () async {
               await Supabase.instance.client.auth.signOut();
-              // FIX: Guard BuildContext across async gap
               if (!mounted) return;
               Navigator.pushReplacement(
                 context,
@@ -167,10 +284,10 @@ class _AttendanceDashboardState extends State<AttendanceDashboard> {
               radius: 30,
               backgroundColor: Colors.white,
               backgroundImage:
-                  (_profile != null && _profile!['avatar_url'] != null)
-                  ? NetworkImage(_profile!['avatar_url'])
+                  (_profile != null && _profile!['reference_photo_url'] != null)
+                  ? NetworkImage(_profile!['reference_photo_url'])
                   : null,
-              child: (_profile?['avatar_url'] == null)
+              child: (_profile?['reference_photo_url'] == null)
                   ? const Icon(Icons.person, color: brandDarkBlue)
                   : null,
             ),
@@ -187,6 +304,7 @@ class _AttendanceDashboardState extends State<AttendanceDashboard> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
+
               Text(
                 "ID: ${_profile?['employee_id'] ?? 'N/A'}",
                 style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
@@ -203,7 +321,7 @@ class _AttendanceDashboardState extends State<AttendanceDashboard> {
       children: [
         // FIX: Replaced undefined calendar_check_rounded with event_available_rounded
         _statTile(
-          "Days Present",
+          "Days Present In this Month",
           _presentDays.toString(),
           Icons.event_available_rounded,
           brandDarkBlue,
@@ -260,29 +378,34 @@ class _AttendanceDashboardState extends State<AttendanceDashboard> {
       itemCount: _recentLogs.length,
       itemBuilder: (context, index) {
         final row = _recentLogs[index];
-        final bool isEntry = row['status'] == 'IN';
-        return Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey.shade100),
-          ),
+
+        // Determine if we are looking at an IN or OUT action
+        final bool hasOutTime = row['out_time'] != null;
+        final String displayStatus = hasOutTime ? 'OUT' : 'IN';
+
+        // Get the timestamp string based on status
+        final String? rawTimestamp = hasOutTime
+            ? row['out_time']
+            : row['in_time'];
+
+        // Format the string using our helper
+        final String formattedTime = _formatDateTime(rawTimestamp);
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12.0),
           child: Row(
             children: [
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  // FIX: replaced deprecated withOpacity with .withValues
-                  color: isEntry
+                  color: !hasOutTime
                       ? Colors.green.withValues(alpha: 0.1)
                       : Colors.orange.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(
-                  isEntry ? Icons.login_rounded : Icons.logout_rounded,
-                  color: isEntry ? Colors.green : Colors.orange,
+                  !hasOutTime ? Icons.login_rounded : Icons.logout_rounded,
+                  color: !hasOutTime ? Colors.green : Colors.orange,
                   size: 20,
                 ),
               ),
@@ -291,20 +414,24 @@ class _AttendanceDashboardState extends State<AttendanceDashboard> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    "Punch ${row['status']}",
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
+                    "Punch $displayStatus",
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w600,
                       fontSize: 14,
+                      color: brandDarkBlue,
                     ),
                   ),
                   Text(
-                    row['created_at'] ?? 'Time Unknown',
-                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                    formattedTime, // Displayed as: Feb 10, 10:30 AM
+                    style: GoogleFonts.poppins(
+                      color: Colors.grey[500],
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
               const Spacer(),
-              const Icon(Icons.chevron_right, color: Colors.grey),
+              const Icon(Icons.chevron_right, color: Colors.grey, size: 18),
             ],
           ),
         );
@@ -313,6 +440,32 @@ class _AttendanceDashboardState extends State<AttendanceDashboard> {
   }
 
   Widget _buildPunchButton(BuildContext context) {
+    // Decide label and enabled state based on today's attendance and time windows
+    final now = DateTime.now();
+    DateTime _todayAt(int hour, int minute) =>
+        DateTime(now.year, now.month, now.day, hour, minute);
+    final inStart = _todayAt(9, 45);
+    final inEnd = _todayAt(20, 20);
+    final outStart = _todayAt(10, 00);
+    final outEnd = _todayAt(23, 59);
+    bool isWithin(DateTime start, DateTime end) =>
+        now.isAtSameMomentAs(start) ||
+        now.isAtSameMomentAs(end) ||
+        (now.isAfter(start) && now.isBefore(end));
+
+    String label = "VERIFY & PUNCH";
+    bool enabled = true;
+    if (_today == null || _today!['in_time'] == null) {
+      label = "VERIFY & PUNCH IN";
+      enabled = isWithin(inStart, inEnd);
+    } else if (_today!['out_time'] == null) {
+      label = "VERIFY & PUNCH OUT";
+      enabled = isWithin(outStart, outEnd);
+    } else {
+      label = "ATTENDANCE COMPLETED";
+      enabled = false;
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 20),
       child: Container(
@@ -328,14 +481,14 @@ class _AttendanceDashboardState extends State<AttendanceDashboard> {
           ],
         ),
         child: ElevatedButton(
-          onPressed: () {
-            // FIX: Class name CameraScreen used here.
-            // Ensure camera_screen.dart defines "class CameraScreen".
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const CameraScreen()),
-            );
-          },
+          onPressed: enabled
+              ? () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const CameraScreen()),
+                  ).then((_) => _loadData());
+                }
+              : null,
           style: ElevatedButton.styleFrom(
             backgroundColor: brandOrange,
             minimumSize: const Size(double.infinity, 60),
@@ -346,12 +499,12 @@ class _AttendanceDashboardState extends State<AttendanceDashboard> {
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
-              Icon(Icons.camera_alt_rounded, color: Colors.white),
-              SizedBox(width: 10),
+            children: [
+              const Icon(Icons.camera_alt_rounded, color: Colors.white),
+              const SizedBox(width: 10),
               Text(
-                "VERIFY & PUNCH IN",
-                style: TextStyle(
+                label,
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1,

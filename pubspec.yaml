@@ -18,6 +18,11 @@ dependencies:
   google_fonts: ^6.2.1
   font_awesome_flutter: ^10.7.0
   flutter_launcher_icons: ^0.12.0
+  google_mlkit_face_detection: ^0.12.0
+  intl: ^0.18.1
+  xml: ^6.5.0
+  path_provider: ^2.1.5
+  share_plus: ^12.0.1
 
 dev_dependencies:
   flutter_test:
@@ -27,6 +32,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/images/company_logo.png
 
 flutter_icons:
   android: true

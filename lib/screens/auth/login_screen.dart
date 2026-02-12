@@ -4,7 +4,9 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../services/auth_service.dart';
 import 'signup_screen.dart';
 import '../attendance_dashboard.dart';
-import '../admin/create_employee_screen.dart';
+import '../admin/admin_dashboard.dart';
+import '../../services/supabase_service.dart';
+
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -38,6 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _loading = true);
     try {
+      // 1. Perform Authentication
       final user = await AuthService().signIn(
         email: _emailCtrl.text.trim(),
         password: _passCtrl.text.trim(),
@@ -45,30 +48,43 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (user != null) {
         if (!mounted) return;
-        Navigator.pushReplacement(
-          context,
-          // MaterialPageRoute(builder: (_) => const CreateEmployeeScreen()),
-          MaterialPageRoute(builder: (_) => const AttendanceDashboard()),
-        );
+
+        // 2. Fetch User Profile/Role immediately after login
+        // Assuming SupabaseService has getProfile(userId)
+        final profile = await SupabaseService().getProfile(user.id);
+        final String role = (profile?['role'] ?? 'employee')
+            .toString()
+            .toLowerCase();
+
+        if (!mounted) return;
+
+        // 3. Role-Based Navigation
+        if (role == 'admin' || role == 'superadmin') {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const AdminDashboard(),
+            ), // Admin starts at the logs
+          );
+        } else {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const AttendanceDashboard(),
+            ), // Employees start at dashboard
+          );
+        }
       } else {
-        // This handles cases where the service returns null without throwing an exception
         _showError('Invalid email or password.');
       }
     } catch (e) {
-      // Logic to determine the error message
       String errorMessage = "An unexpected error occurred.";
-
       if (e.toString().contains('user-not-found') ||
           e.toString().contains('wrong-password')) {
         errorMessage = "Invalid credentials. Please try again.";
-      } else if (e.toString().contains('network-request-failed') ||
-          e.toString().contains('SocketException')) {
-        errorMessage = "Network error: Please check your internet connection.";
       } else {
-        errorMessage = e
-            .toString(); // For debugging, or use a friendlier generic message
+        errorMessage = e.toString();
       }
-
       _showError(errorMessage);
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -101,7 +117,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 30),
                   _buildLoginCard(),
                   const SizedBox(height: 20),
-                  _buildFooter(),
+                  // _buildFooter(),
                 ],
               ),
             ),
@@ -122,36 +138,46 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildLogoSection() {
-    return Column(
-      children: [
-        const FaIcon(
-          FontAwesomeIcons.boltLightning,
-          size: 50,
-          color: brandOrange,
-        ),
-        const SizedBox(height: 12),
-        Text(
-          "TRANSGULF",
-          style: GoogleFonts.montserrat(
-            fontSize: 26,
-            fontWeight: FontWeight.w900,
+   Widget _buildLogoSection() {
+  return Column(
+    children: [
+      Image.asset(
+        'assets/images/company_logo.png',
+        height: 90,          // 🔹 control logo size here
+        width: 90,
+        fit: BoxFit.contain, // keeps aspect ratio
+        errorBuilder: (context, error, stackTrace) {
+          return const Icon(
+            Icons.business,
+            size: 60,
             color: brandDarkBlue,
-            letterSpacing: 2,
-          ),
+          );
+        },
+      ),
+
+      const SizedBox(height: 16),
+
+      Text(
+        "TRANSGULF",
+        style: GoogleFonts.montserrat(
+          fontSize: 26,
+          fontWeight: FontWeight.w900,
+          color: brandDarkBlue,
+          letterSpacing: 2,
         ),
-        Text(
-          "GLOBAL POWER LIMITED",
-          style: GoogleFonts.montserrat(
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
-            color: brandDarkBlue.withOpacity(0.7),
-            letterSpacing: 4,
-          ),
+      ),
+      Text(
+        "GLOBAL POWER LIMITED",
+        style: GoogleFonts.montserrat(
+          fontSize: 10,
+          fontWeight: FontWeight.w500,
+          color: brandDarkBlue.withOpacity(0.7),
+          letterSpacing: 4,
         ),
-      ],
-    );
-  }
+      ),
+    ],
+  );
+}
 
   Widget _buildLoginCard() {
     return Container(
@@ -302,4 +328,5 @@ class _LoginScreenState extends State<LoginScreen> {
       ],
     );
   }
+
 }

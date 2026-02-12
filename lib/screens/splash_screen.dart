@@ -10,7 +10,8 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
 
@@ -60,14 +61,11 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
               gradient: RadialGradient(
                 center: Alignment.center,
                 radius: 1.5,
-                colors: [
-                  brandDarkBlue.withValues(alpha: 0.8),
-                  brandDarkBlue,
-                ],
+                colors: [brandDarkBlue.withValues(alpha: 0.8), brandDarkBlue],
               ),
             ),
           ),
-          
+
           Center(
             child: FadeTransition(
               opacity: _fadeAnimation,
@@ -75,26 +73,20 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   // App Logo Container
-                  Container(
+                  Image.asset(
+                    'assets/images/company_logo.png',
+                    height: 120, // adjust size freely
                     width: 120,
-                    height: 120,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: brandOrange.withValues(alpha: 0.4),
-                          blurRadius: 20,
-                          spreadRadius: 5,
-                        )
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.bolt_rounded, // Replace with Image.asset('assets/logo.png')
-                      size: 70,
-                      color: brandOrange,
-                    ),
+                    fit: BoxFit.contain, // keeps logo proportions
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Icon(
+                        Icons.business,
+                        size: 70,
+                        color: brandOrange,
+                      );
+                    },
                   ),
+
                   const SizedBox(height: 24),
                   Text(
                     "TRANSGULF",
@@ -118,7 +110,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
               ),
             ),
           ),
-          
+
           // Bottom Indicator
           Positioned(
             bottom: 50,

@@ -64,7 +64,22 @@ class AuthService {
       throw Exception('Sign up failed: $e');
     }
   }
-
+  
+  Future<void> updatePassword(String newPassword) async {
+    try {
+      await _retryWithBackoff(
+        () => _client.auth.updateUser(
+          UserAttributes(password: newPassword),
+        ),
+      );
+    } catch (e) {
+      if (_isRateLimitError(e)) {
+        throw Exception('Too many requests. Please wait before trying again.');
+      }
+      throw Exception('Failed to update password: $e');
+    }
+  }
+  
   Future<T> _retryWithBackoff<T>(
     Future<T> Function() operation, {
     int maxRetries = 3,

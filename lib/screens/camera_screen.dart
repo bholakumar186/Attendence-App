@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
 import '../services/attendance_manager.dart';
 import 'auth/login_screen.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -18,10 +19,19 @@ class _CameraScreenState extends State<CameraScreen> {
   CameraController? _controller;
   bool _isInitialized = false;
   bool _isProcessing = false;
+  late final FaceDetector _faceDetector;
 
   @override
   void initState() {
     super.initState();
+    _faceDetector = FaceDetector(
+      options: FaceDetectorOptions(
+        enableLandmarks: false,
+        enableContours: false,
+        enableClassification: true,
+        performanceMode: FaceDetectorMode.accurate,
+      ),
+    );
     _initializeCamera();
   }
 
@@ -53,6 +63,57 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
+  Future<bool> _processAttendanceImage(XFile capturedSelfie) async {
+    final inputImage = InputImage.fromFilePath(capturedSelfie.path);
+
+    try {
+      final faces = await _faceDetector.processImage(inputImage);
+
+      if (faces.isEmpty) {
+        _showSnackBar('No face detected. Please try again.', isError: true);
+        return false;
+      }
+
+      if (faces.length > 1) {
+        _showSnackBar(
+          'Multiple faces detected. Ensure only you are in frame.',
+          isError: true,
+        );
+        return false;
+      }
+
+      final face = faces.first;
+
+      // Pose check
+      if ((face.headEulerAngleY ?? 0).abs() > 15 ||
+          (face.headEulerAngleZ ?? 0).abs() > 15) {
+        _showSnackBar('Please look straight at the camera.', isError: true);
+        return false;
+      }
+
+      // Size / distance check
+      if (face.boundingBox.width < 180) {
+        _showSnackBar('Move closer to the camera.', isError: true);
+        return false;
+      }
+
+      // Liveness (eyes open)
+      final leftEye = face.leftEyeOpenProbability ?? 1.0;
+      final rightEye = face.rightEyeOpenProbability ?? 1.0;
+
+      if (leftEye < 0.4 && rightEye < 0.4) {
+        _showSnackBar('Please keep your eyes open.', isError: true);
+        return false;
+      }
+
+      return true;
+    } catch (e, s) {
+      developer.log("Face Detection Error", error: e, stackTrace: s);
+      _showSnackBar('Image processing failed.', isError: true);
+      return false;
+    }
+  }
+
   /// Orchestrates Face Matching, Geofencing, and Database submission
   Future<void> _handleFinalAttendanceTrigger(XFile capturedSelfie) async {
     try {
@@ -75,11 +136,12 @@ class _CameraScreenState extends State<CameraScreen> {
 
       final employeeId = profile['employee_id'] ?? user.id;
 
-      // Face verification (server-side ideally)
-      bool isFaceMatched = await supa.verifyFaceMatch(
-        capturedSelfie,
-        user.id,
-      );
+      // 1️⃣ Client-side validation FIRST
+      // final isValid = await _processAttendanceImage(capturedSelfie);
+      // if (!isValid) return;
+
+      // Face verification (server-side)
+      bool isFaceMatched = await supa.verifyFaceMatch(capturedSelfie, user.id);
       if (!isFaceMatched) {
         _showSnackBar("Face does not match record.", isError: true);
         return;
@@ -139,6 +201,7 @@ class _CameraScreenState extends State<CameraScreen> {
   @override
   void dispose() {
     _controller?.dispose();
+    _faceDetector.close();
     super.dispose();
   }
 

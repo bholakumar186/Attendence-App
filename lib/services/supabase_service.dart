@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
+import 'dart:io';
 
 class SupabaseService {
   final _client = Supabase.instance.client;
@@ -80,6 +82,65 @@ class SupabaseService {
     }
   }
 
+  /// Fetch all attendance records (admin use)
+  Future<List<dynamic>> fetchAllAttendance({int? limit, int? offset}) async {
+    try {
+      final query = _client
+          .from('attendance')
+          .select('*, employees(full_name, employee_id)')
+          .order('created_at', ascending: false);
+
+      if (limit != null) query.limit(limit);
+      if (offset != null) query.range(offset, (offset + (limit ?? 100)) - 1);
+
+      final res = await query;
+      return res as List<dynamic>? ?? [];
+    } catch (e) {
+      debugPrint('fetchAllAttendance error: $e');
+      return [];
+    }
+  }
+
+  /// Fetch attendance in a date range (admin use)
+  Future<List<dynamic>> fetchAttendanceByDateRange({
+    required DateTime from,
+    required DateTime to,
+    String? employeeId,
+  }) async {
+    try {
+      // 1. Format dates to ISO8601 strings (yyyy-MM-dd)
+      final fromStr = DateFormat('yyyy-MM-dd').format(from);
+      final String toStr = DateFormat('yyyy-MM-dd').format(to);
+
+      // 2. Build the query
+      // Note: Use 'employees!inner' if you want to ensure only records
+      // with valid employee links are shown.
+      var query = _client
+          .from('attendance')
+          .select('*, employees(full_name, employee_id)');
+
+      // 3. Apply Filters
+      query = query.gte('date', fromStr).lte('date', toStr);
+
+      if (employeeId != null && employeeId.trim().isNotEmpty) {
+        // Use 'eq' on the attendance table's employee_id
+        query = query.eq('employee_id', employeeId.trim());
+      }
+
+      // 4. Order and Execute
+      final List<Map<String, dynamic>> res = await query.order(
+        'date',
+        ascending: false,
+      );
+
+      return res;
+    } catch (e) {
+      // This will tell you if it's a "column not found" or "permission denied" error
+      debugPrint('Supabase Error: $e');
+      return [];
+    }
+  }
+
   Future<Map<String, dynamic>?> fetchTodayAttendance(String employeeId) async {
     try {
       final res = await _client
@@ -97,19 +158,29 @@ class SupabaseService {
 
   Future<int> getPresentDaysCount(String employeeId) async {
     try {
-      final logs = await fetchAttendanceRecords(employeeId);
-      final days = <String>{};
-      for (final row in logs) {
-        if (row['status']?.toString().toUpperCase() != 'IN') continue;
-        final created = row['created_at'];
-        if (created == null) continue;
-        final date = DateTime.parse(
-          created.toString(),
-        ).toIso8601String().split('T').first;
-        days.add(date);
-      }
-      return days.length;
+      // Get the first day of the current month
+      final now = DateTime.now();
+      final firstDayOfMonth = DateTime(
+        now.year,
+        now.month,
+        1,
+      ).toIso8601String();
+
+      // Fetch records only for this month to improve performance
+      final res = await _client
+          .from('attendance')
+          .select('date')
+          .eq('employee_id', employeeId)
+          .gte('date', firstDayOfMonth);
+
+      // Using a Set ensures we only count unique days
+      // (in case there are multiple logs for one day)
+      final List<dynamic> data = res as List<dynamic>;
+      final uniqueDays = data.map((row) => row['date'].toString()).toSet();
+
+      return uniqueDays.length;
     } catch (e) {
+      debugPrint("Error counting present days: $e");
       return 0;
     }
   }
@@ -243,6 +314,7 @@ class SupabaseService {
     }
   }
 
+  // Inside SupabaseService class
   Future<Map<String, dynamic>> createEmployeeViaAdmin({
     required String name,
     required String email,
@@ -251,52 +323,99 @@ class SupabaseService {
     String? role,
     required String adminApiUrl,
     required String adminApiKey,
+    File? imageFile, // New Parameter
   }) async {
-    // Calls your protected admin endpoint which uses the Supabase service role key
-
-    // Quick validation to catch common client mistakes (missing scheme, empty URL)
-    if (adminApiUrl.trim().isEmpty) {
-      return {'success': false, 'message': 'Admin API URL is required.'};
-    }
-    final url = adminApiUrl.trim();
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      return {
-        'success': false,
-        'message': 'Admin API URL must start with http:// or https://',
-      };
-    }
-
     try {
-      final uri = Uri.parse('$url/admin/create-employee');
-      final headers = {
-        'Content-Type': 'application/json',
-        'x-admin-api-key': adminApiKey,
-      };
+      String? photoUrl;
+      String? fileName;
+
+      // 1. Upload Photo to Bucket if exists
+      if (imageFile != null) {
+        final fileName =
+            '${DateTime.now().millisecondsSinceEpoch}_${name.replaceAll(' ', '_')}.jpg';
+        final path = 'profiles/$fileName';
+
+        await Supabase.instance.client.storage
+            .from('employee_photo')
+            .upload(path, imageFile);
+
+        // Get Public URL
+        photoUrl = Supabase.instance.client.storage
+            .from('employee_photo')
+            .getPublicUrl(path);
+      }
+
+      // 2. Prepare API Call
+      final uri = Uri.parse('${adminApiUrl.trim()}/admin/create-employee');
       final body = jsonEncode({
         'name': name,
         'email': email,
         'password': password,
         'phone': phone,
         'role': role ?? 'employee',
+        'reference_photo_url': photoUrl,
+        'reference_photo': imageFile != null ? fileName : null,
       });
 
-      // Helpful debug log for client-side troubleshooting
-      debugPrint('Calling Admin API: $uri');
+      final resp = await http.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-api-key': adminApiKey,
+        },
+        body: body,
+      );
 
-      final resp = await http.post(uri, headers: headers, body: body);
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(resp.body);
-        return {'success': true, 'data': data};
-      }
+      if (resp.statusCode == 200)
+        return {'success': true, 'data': jsonDecode(resp.body)};
+      return {'success': false, 'message': 'API error: ${resp.body}'};
+    } catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
 
-      return {
-        'success': false,
-        'message': 'Admin API error: ${resp.statusCode} ${resp.body}',
-      };
-    } catch (e, st) {
-      // Include stack trace for richer debugging when running locally
-      debugPrint('Admin API call failed: $e\n$st');
-      return {'success': false, 'message': 'Network error: ${e.toString()}'};
+  // Inside SupabaseService class
+  Future<String?> updateEmployeePhoto(
+    String employeeUuid,
+    XFile imageFile,
+  ) async {
+    try {
+      final bytes = await imageFile.readAsBytes();
+
+      // Generate file name
+      final fileName =
+          'ref_${employeeUuid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+      final path = 'profiles/$fileName';
+
+      // Upload with upsert
+      await _client.storage
+          .from('employee_photo')
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: const FileOptions(
+              upsert: true,
+              contentType: 'image/jpeg',
+            ),
+          );
+
+      final url = _client.storage.from('employee_photo').getPublicUrl(path);
+
+      // ✅ Update BOTH url and filename
+      await _client
+          .from('employees')
+          .update({
+            'reference_photo_url': url,
+            'reference_photo': fileName, // ✅ Save filename
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', employeeUuid);
+
+      return url;
+    } catch (e) {
+      debugPrint('Error updating photo: $e');
+      return null;
     }
   }
 }

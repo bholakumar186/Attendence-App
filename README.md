@@ -79,5 +79,7 @@ flutter run
   <img src="https://github.com/user-attachments/assets/fd925cd7-b9d5-4c50-95af-e6c3001aeef9" width="250"/>
 </p>
 
+<p align="right">
+Developed with ❤️ by <a href="https://github.com/Bholakumar186"><b>Bholakumar186</b></a>
+</p>
 
-                                                                                                                                                                           Developed with ❤️ by Bholakumar186
